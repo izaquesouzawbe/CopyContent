@@ -5,8 +5,8 @@
     <vendor url="https://www.monitence.com">Monitence</vendor>
 
     <description><![CDATA[
-        Copia conteúdo de arquivos e diretórios para um painel (Tool Window) para facilitar colagem.
-        Também permite aplicar conteúdo do clipboard em um arquivo do projeto usando o nome do arquivo na primeira linha.
+        Copia conteúdo de arquivos e diretórios para um painel (Tool Window) ou diretamente para a área de transferência.
+        Também aplica conteúdo do clipboard em um arquivo pelo nome do arquivo na primeira linha (atalho).
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
@@ -23,18 +23,29 @@
     </extensions>
 
     <actions>
-        <action id="com.monitence.copycontent.CopyContentSmartAction"
-                class="com.monitence.copycontent.CopyContentSmartAction"
-                text="Copiar conteúdo"
-                description="Se for arquivo, adiciona ao painel. Se for pasta, varre recursivamente e adiciona ao painel.">
+        <!-- 1) Copiar direto para a área de transferência -->
+        <action id="com.monitence.copycontent.CopyContentToClipboardAction"
+                class="com.monitence.copycontent.CopyContentToClipboardAction"
+                text="Copiar conteúdo (Área de transferência)"
+                description="Se for arquivo, copia o conteúdo. Se for pasta, varre recursivamente e copia o conteúdo dos arquivos.">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="first"/>
         </action>
 
+        <!-- 2) Juntar no painel (memo) -->
+        <action id="com.monitence.copycontent.CopyContentSmartAction"
+                class="com.monitence.copycontent.CopyContentSmartAction"
+                text="Juntar conteúdo (no painel)"
+                description="Se for arquivo, adiciona ao painel. Se for pasta, varre recursivamente e adiciona ao painel.">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="after"
+                          relative-to-action="com.monitence.copycontent.CopyContentToClipboardAction"/>
+        </action>
+
+        <!-- 3) Atalho: aplicar clipboard em arquivo por nome -->
         <action id="com.monitence.copycontent.ApplyClipboardByFileNameAction"
                 class="com.monitence.copycontent.ApplyClipboardByFileNameAction"
                 text="Aplicar Clipboard no arquivo (por nome)"
-                description="A primeira linha do clipboard deve conter o nome do arquivo. O plugin encontra o arquivo, abre, mostra diff e aplica com confirmação.">
-            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift P"/>
+                description="A primeira linha do clipboard deve conter o nome do arquivo. O plugin encontra ou cria, abre, mostra diff e aplica com confirmação.">
+            <keyboard-shortcut keymap="$default" first-keystroke="control alt V"/>
         </action>
     </actions>
 </idea-plugin>

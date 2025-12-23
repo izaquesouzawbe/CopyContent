@@ -5,11 +5,15 @@ import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
+import com.intellij.openapi.fileChooser.FileChooser
+import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.roots.ProjectRootManager
+import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
@@ -53,58 +57,97 @@ class ApplyClipboardByFileNameAction : AnAction("Aplicar Clipboard no arquivo (p
         val scope = GlobalSearchScope.projectScope(project)
         val candidates = FilenameIndex.getVirtualFilesByName(project, fileName, scope).toList()
 
-        if (candidates.isEmpty()) {
-            notify(project, "Nenhum arquivo encontrado com nome: $fileName", NotificationType.ERROR)
-            return
-        }
-
-        // UI deve rodar no EDT
         ApplicationManager.getApplication().invokeLater {
-            if (candidates.size == 1) {
-                openDiffAndMaybeApply(project, candidates.first(), newText)
-                return@invokeLater
+            when {
+                candidates.isEmpty() -> handleNotFound(project, e, fileName, newText)
+                candidates.size == 1 -> openDiffAndMaybeApply(project, candidates.first(), newText)
+                else -> chooseAmongMany(project, candidates, fileName, newText)
             }
-
-            // múltiplos arquivos com mesmo nome: oferecer escolha com caminho + similaridade estimada
-            val ranked = candidates
-                .map { vf -> Candidate(vf, similarityPercent(readFileText(vf) ?: "", newText)) }
-                .sortedByDescending { it.similarity }
-
-            val list = ranked
-
-            val popup = JBPopupFactory.getInstance()
-                .createPopupChooserBuilder(list)
-                .setTitle("Escolha o arquivo para aplicar: $fileName")
-                .setRenderer(object : SimpleListCellRenderer<Candidate>() {
-                    override fun customize(
-                        list: JList<out Candidate>,
-                        value: Candidate,
-                        index: Int,
-                        selected: Boolean,
-                        hasFocus: Boolean
-                    ) {
-                        text = "${value.vf.path}  —  similaridade ~${value.similarity}%"
-                    }
-                })
-                .setItemChosenCallback { chosen ->
-                    openDiffAndMaybeApply(project, chosen.vf, newText)
-                }
-                .createPopup()
-
-            popup.showInFocusCenter()
         }
     }
 
-    private fun openDiffAndMaybeApply(project: Project, target: VirtualFile, newText: String) {
-        // abre no editor antes, como você pediu
-        FileEditorManager.getInstance(project).openFile(target, true, true)
+    private fun chooseAmongMany(project: Project, candidates: List<VirtualFile>, fileName: String, newText: String) {
+        val ranked = candidates
+            .map { vf -> Candidate(vf, similarityPercent(readFileText(vf) ?: "", newText)) }
+            .sortedByDescending { it.similarity }
 
-        val oldText = readFileText(target)
-        if (oldText == null) {
-            notify(project, "Não foi possível ler o arquivo atual: ${target.path}", NotificationType.ERROR)
+        val popup = JBPopupFactory.getInstance()
+            .createPopupChooserBuilder(ranked)
+            .setTitle("Escolha o arquivo para aplicar: $fileName")
+            .setRenderer(object : SimpleListCellRenderer<Candidate>() {
+                override fun customize(
+                    list: JList<out Candidate>,
+                    value: Candidate,
+                    index: Int,
+                    selected: Boolean,
+                    hasFocus: Boolean
+                ) {
+                    text = "${value.vf.path}  —  similaridade ~${value.similarity}%"
+                }
+            })
+            .setItemChosenCallback { chosen ->
+                openDiffAndMaybeApply(project, chosen.vf, newText)
+            }
+            .createPopup()
+
+        popup.showInFocusCenter()
+    }
+
+    private fun handleNotFound(project: Project, e: AnActionEvent, fileName: String, newText: String) {
+        val suggestedDir = suggestDirectory(project, e)
+        if (suggestedDir == null) {
+            notify(project, "Não consegui determinar um diretório para sugerir criação do arquivo.", NotificationType.ERROR)
             return
         }
 
+        val dialog = CreateFileLocationDialog(project, fileName, suggestedDir.path)
+        dialog.show()
+
+        when (dialog.exitCode) {
+            DialogWrapper.OK_EXIT_CODE -> {
+                val created = createFileIfNeeded(project, suggestedDir, fileName) ?: return
+                openDiffAndMaybeApply(project, created, newText, treatAsNewFile = true)
+            }
+
+            CreateFileLocationDialog.CHOOSE_FOLDER_EXIT_CODE -> {
+                val descriptor = FileChooserDescriptorFactory.createSingleFolderDescriptor().apply {
+                    title = "Escolha a pasta para criar $fileName"
+                    description = "Selecione a pasta onde o arquivo será criado."
+                }
+
+                val chosenDir = FileChooser.chooseFile(descriptor, project, suggestedDir) ?: return
+                val created = createFileIfNeeded(project, chosenDir, fileName) ?: return
+                openDiffAndMaybeApply(project, created, newText, treatAsNewFile = true)
+            }
+
+            else -> return
+        }
+    }
+
+    private fun createFileIfNeeded(project: Project, dir: VirtualFile, fileName: String): VirtualFile? {
+        if (!dir.isValid || !dir.isDirectory) {
+            notify(project, "Diretório inválido para criação: ${dir.path}", NotificationType.ERROR)
+            return null
+        }
+
+        val existing = dir.findChild(fileName)
+        if (existing != null && existing.isValid && !existing.isDirectory) return existing
+
+        var created: VirtualFile? = null
+        WriteCommandAction.runWriteCommandAction(project, "Criar arquivo $fileName", null, Runnable {
+            created = dir.createChildData(this, fileName)
+        })
+
+        if (created == null) {
+            notify(project, "Falha ao criar o arquivo: ${dir.path}/$fileName", NotificationType.ERROR)
+        }
+        return created
+    }
+
+    private fun openDiffAndMaybeApply(project: Project, target: VirtualFile, newText: String, treatAsNewFile: Boolean = false) {
+        FileEditorManager.getInstance(project).openFile(target, true, true)
+
+        val oldText = if (treatAsNewFile) "" else (readFileText(target) ?: "")
         val dialog = ConfirmApplyDiffDialog(project, target, oldText, newText)
         val ok = dialog.showAndGet()
         if (!ok) return
@@ -119,6 +162,31 @@ class ApplyClipboardByFileNameAction : AnAction("Aplicar Clipboard no arquivo (p
         notify(project, "Atualizado: ${target.path}", NotificationType.INFORMATION)
     }
 
+    /**
+     * Sugestão de diretório para criação:
+     * 1) seleção no Project (se diretório, ele; se arquivo, parent)
+     * 2) arquivo aberto no editor (parent)
+     * 3) primeiro source root
+     * 4) baseDir do projeto
+     */
+    private fun suggestDirectory(project: Project, e: AnActionEvent): VirtualFile? {
+        val selected = e.getData(CommonDataKeys.VIRTUAL_FILE)
+        if (selected != null && selected.isValid) {
+            if (selected.isDirectory) return selected
+            selected.parent?.let { return it }
+        }
+
+        val editorFile = FileEditorManager.getInstance(project).selectedFiles.firstOrNull()
+        if (editorFile != null && editorFile.isValid) {
+            editorFile.parent?.let { return it }
+        }
+
+        val roots = ProjectRootManager.getInstance(project).contentSourceRoots
+        roots.firstOrNull()?.let { return it }
+
+        return project.baseDir
+    }
+
     private fun readClipboardText(): String? {
         val contents = CopyPasteManager.getInstance().contents ?: return null
         return runCatching { contents.getTransferData(DataFlavor.stringFlavor) as String }.getOrNull()
@@ -129,12 +197,6 @@ class ApplyClipboardByFileNameAction : AnAction("Aplicar Clipboard no arquivo (p
         return doc?.text ?: runCatching { String(vf.contentsToByteArray(), vf.charset) }.getOrNull()
     }
 
-    /**
-     * Similaridade simples e barata:
-     * - compara linhas na mesma posição (até o menor tamanho)
-     * - penaliza diferença de tamanho
-     * Retorna 0..100.
-     */
     private fun similarityPercent(oldText: String, newText: String): Int {
         val a = oldText.replace("\r\n", "\n").split('\n')
         val b = newText.replace("\r\n", "\n").split('\n')

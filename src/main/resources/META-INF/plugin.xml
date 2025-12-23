@@ -6,6 +6,7 @@
 
     <description><![CDATA[
         Copia conteúdo de arquivos e diretórios para um painel (Tool Window) para facilitar colagem.
+        Também permite aplicar conteúdo do clipboard em um arquivo do projeto usando o nome do arquivo na primeira linha.
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
@@ -15,6 +16,10 @@
                     anchor="right"
                     icon="/icons/copyContent.svg"
                     factoryClass="com.monitence.copycontent.CopyContentToolWindowFactory"/>
+
+        <notificationGroup id="CopyContent Notifications"
+                           displayType="BALLOON"
+                           isLogByDefault="true"/>
     </extensions>
 
     <actions>
@@ -23,6 +28,13 @@
                 text="Copiar conteúdo"
                 description="Se for arquivo, adiciona ao painel. Se for pasta, varre recursivamente e adiciona ao painel.">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="first"/>
+        </action>
+
+        <action id="com.monitence.copycontent.ApplyClipboardByFileNameAction"
+                class="com.monitence.copycontent.ApplyClipboardByFileNameAction"
+                text="Aplicar Clipboard no arquivo (por nome)"
+                description="A primeira linha do clipboard deve conter o nome do arquivo. O plugin encontra o arquivo, abre, mostra diff e aplica com confirmação.">
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift P"/>
         </action>
     </actions>
 </idea-plugin>

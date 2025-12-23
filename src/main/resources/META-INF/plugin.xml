@@ -1,0 +1,28 @@
+<idea-plugin>
+    <id>com.monitence.CopyContentPlugin</id>
+    <name>CopyContentPlugin</name>
+
+    <vendor url="https://www.monitence.com">Monitence</vendor>
+
+    <description><![CDATA[
+        Copia conteúdo de arquivos e diretórios para um painel (Tool Window) para facilitar colagem.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="Copiar Conteúdo"
+                    anchor="right"
+                    icon="/icons/copyContent.svg"
+                    factoryClass="com.monitence.copycontent.CopyContentToolWindowFactory"/>
+    </extensions>
+
+    <actions>
+        <action id="com.monitence.copycontent.CopyContentSmartAction"
+                class="com.monitence.copycontent.CopyContentSmartAction"
+                text="Copiar conteúdo"
+                description="Se for arquivo, adiciona ao painel. Se for pasta, varre recursivamente e adiciona ao painel.">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="first"/>
+        </action>
+    </actions>
+</idea-plugin>
